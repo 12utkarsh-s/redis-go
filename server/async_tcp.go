@@ -5,11 +5,13 @@ import (
 	"net"
 	"redis-go/config"
 	"redis-go/core"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
 
-var conClients int = 0
+var conClients = 0
+var lastCronExecution = time.Now()
 
 func RunAsyncTCPServer() error {
 	log.Println("Starting async tcp server on ", config.Host, config.Port)
@@ -69,6 +71,11 @@ func RunAsyncTCPServer() error {
 	}
 
 	for {
+		if time.Now().After(lastCronExecution.Add(config.ExpiryCronFrequency)) {
+			core.DeleteExpiredKeys()
+			lastCronExecution = time.Now()
+		}
+
 		nevents, err := unix.Kevent(kqueueFD, nil, events[:], nil)
 		if err != nil {
 			continue
