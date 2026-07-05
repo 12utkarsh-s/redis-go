@@ -107,7 +107,44 @@ func evalTTL(args []string, conn io.ReadWriter) error {
 		return nil
 	}
 
-	conn.Write(Encode(int64(durationLeft/1000), false))
+	conn.Write(Encode(durationLeft/1000, false))
+	return nil
+}
+
+func evalDEL(args []string, conn io.ReadWriter) error {
+	var countDeleted = 0
+
+	for _, key := range args {
+		if ok := Delete(key); ok {
+			countDeleted++
+		}
+	}
+
+	conn.Write(Encode(countDeleted, false))
+	return nil
+}
+
+func evalEXPIRE(args []string, conn io.ReadWriter) error {
+	if len(args) != 2 {
+		return errors.New("ERR wrong number of arguments for 'expire' command")
+	}
+
+	var key = args[0]
+
+	exDurationSex, err := strconv.ParseInt(args[1], 10, 64)
+	if err != nil {
+		return errors.New("ERR value is not a number or out of range")
+	}
+
+	obj := Get(key)
+	if obj == nil {
+		conn.Write([]byte(":0\r\n"))
+		return nil
+	}
+
+	obj.ExpiresAt = time.Now().UnixMilli() + (exDurationSex * 1000)
+
+	conn.Write([]byte(":1\r\n"))
 	return nil
 }
 
@@ -122,6 +159,10 @@ func EvalAndRespond(cmd *RedisCmd, c io.ReadWriter) error {
 		return evalGET(cmd.Args, c)
 	case "TTL":
 		return evalTTL(cmd.Args, c)
+	case "DEL":
+		return evalDEL(cmd.Args, c)
+	case "EXPIRE":
+		return evalEXPIRE(cmd.Args, c)
 	default:
 		return evalPING(cmd.Args, c)
 	}

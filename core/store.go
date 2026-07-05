@@ -1,7 +1,6 @@
 package core
 
 import (
-	"log"
 	"time"
 )
 
@@ -22,8 +21,6 @@ func NewObject(value interface{}, duration int64) *Object {
 		expiresAt = time.Now().UnixMilli() + duration
 	}
 
-	log.Println("Object", value)
-	log.Println("ExpiresAt", expiresAt)
 	return &Object{
 		ExpiresAt: expiresAt,
 		Value:     value,
@@ -31,10 +28,17 @@ func NewObject(value interface{}, duration int64) *Object {
 }
 
 func Put(key string, obj *Object) {
-	log.Println("Put ", obj.Value, " ", obj.ExpiresAt)
 	store[key] = obj
 }
 
 func Get(key string) *Object {
 	return store[key]
+}
+
+func Delete(key string) bool {
+	if _, ok := store[key]; ok {
+		delete(store, key)
+		return true
+	}
+	return false
 }
