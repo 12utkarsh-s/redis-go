@@ -1,6 +1,7 @@
 package core
 
 import (
+	"redis-go/config"
 	"time"
 )
 
@@ -28,12 +29,15 @@ func NewObject(value interface{}, duration int64) *Object {
 }
 
 func Put(key string, obj *Object) {
+	if len(store) >= config.KeysLimit {
+		Evict()
+	}
 	store[key] = obj
 }
 
 func Get(key string) *Object {
 	obj, _ := store[key]
-	if obj != nil && obj.ExpiresAt <= time.Now().UnixMilli() {
+	if obj != nil && obj.ExpiresAt != -1 && obj.ExpiresAt <= time.Now().UnixMilli() {
 		delete(store, key)
 		return nil
 	}

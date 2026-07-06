@@ -2,6 +2,7 @@ package config
 
 import "time"
 
-var Host string = "0.0.0.0"
-var Port int = 7379
-var ExpiryCronFrequency time.Duration = 1 * time.Second
+var Host = "0.0.0.0"
+var Port = 7379
+var ExpiryCronFrequency = 1 * time.Second
+var KeysLimit = 2

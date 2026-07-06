@@ -11,7 +11,7 @@ import (
 )
 
 var conClients = 0
-var lastCronExecution = time.Now()
+var expiryCronLastExecution = time.Now()
 
 func RunAsyncTCPServer() error {
 	log.Println("Starting async tcp server on ", config.Host, config.Port)
@@ -71,9 +71,9 @@ func RunAsyncTCPServer() error {
 	}
 
 	for {
-		if time.Now().After(lastCronExecution.Add(config.ExpiryCronFrequency)) {
+		if time.Now().After(expiryCronLastExecution.Add(config.ExpiryCronFrequency)) {
 			core.DeleteExpiredKeys()
-			lastCronExecution = time.Now()
+			expiryCronLastExecution = time.Now()
 		}
 
 		nevents, err := unix.Kevent(kqueueFD, nil, events[:], nil)
@@ -107,12 +107,12 @@ func RunAsyncTCPServer() error {
 				}
 			} else {
 				// Kqueue gives us a handy EOF flag we can check right away for disconnects
-				//if events[i].Flags&unix.EV_EOF != 0 {
-				//	log.Println("Client socket closed")
-				//	unix.Close(eventFD)
-				//	conClients -= 1
-				//	continue
-				//}
+				if events[i].Flags&unix.EV_EOF != 0 {
+					log.Println("Client socket closed")
+					unix.Close(eventFD)
+					conClients -= 1
+					continue
+				}
 
 				comm := core.FDComm{Fd: eventFD}
 				cmd, err := readCommand(comm)

@@ -16,7 +16,7 @@ func readCommand(c io.ReadWriter) (*core.RedisCmd, error) {
 	// TODO: Max read in one shot is 512 bytes
 	// To allow input > 512 bytes, then repeated read until
 	// we get EOF or designated delimiter
-	var buf []byte = make([]byte, 512)
+	var buf = make([]byte, 512)
 	n, err := c.Read(buf[:])
 	if err != nil {
 		return nil, err
@@ -48,7 +48,7 @@ func respond(cmd *core.RedisCmd, c io.ReadWriter) {
 func RunSyncTCPServer() {
 	log.Println("starting a synchronous TCP server on", config.Host, config.Port)
 
-	var con_clients int = 0
+	var conClients = 0
 
 	// listening to the configured host:port
 	lsnr, err := net.Listen("tcp", config.Host+":"+strconv.Itoa(config.Port))
@@ -64,16 +64,16 @@ func RunSyncTCPServer() {
 		}
 
 		// increment the number of concurrent clients
-		con_clients += 1
-		log.Println("client connected with address:", c.RemoteAddr(), ", concurrent clients", con_clients)
+		conClients += 1
+		log.Println("client connected with address:", c.RemoteAddr(), ", concurrent clients", conClients)
 
 		for {
 			// over the socket, continuously read the command and print it out
 			cmd, err := readCommand(c)
 			if err != nil {
 				c.Close()
-				con_clients -= 1
-				log.Println("client disconnected", c.RemoteAddr(), "concurrent clients", con_clients)
+				conClients -= 1
+				log.Println("client disconnected", c.RemoteAddr(), "concurrent clients", conClients)
 				if err == io.EOF {
 					break
 				}

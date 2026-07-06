@@ -15,6 +15,10 @@ func setupFlags() {
 
 func main() {
 	setupFlags()
-	log.Println("Connecting to redis server...")
-	server.RunAsyncTCPServer()
+	log.Println("Connecting to redis server 📶")
+	err := server.RunAsyncTCPServer()
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
 }
