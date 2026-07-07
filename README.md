@@ -42,7 +42,7 @@ By default, the server will start on `0.0.0.0:7379`. You can change the host and
 go run main.go -host=127.0.0.1 -port=6379
 ```
 
-### Usage
+## Usage
 
 You can use any Redis client to connect to the server. For example, using `redis-cli`:
 
@@ -55,4 +55,17 @@ PONG
 OK
 127.0.0.1:7379> GET mykey
 "Hello"
+```
+
+### Pipelining Example
+
+```
+PING:       *1\r\n$4\r\nPING\r\n
+SET k v:    *3\r\n$3\r\nSET\r\n$1\r\nk\r\n$1\r\nv\r\n
+GET k:      *2\r\n$3\r\nGET\r\n$1\r\nk\r\n
+```
+
+```
+$ (printf 'CMD1CMD2CMD3';) | nc localhost 7379
+$ (printf '*1\r\n$4\r\nPING\r\n*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$1\r\nv\r\n*2\r\n$3\r\nGET\r\n$1\r\nk\r\n';) | nc localhost 7379
 ```

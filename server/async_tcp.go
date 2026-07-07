@@ -107,21 +107,22 @@ func RunAsyncTCPServer() error {
 				}
 			} else {
 				// Kqueue gives us a handy EOF flag we can check right away for disconnects
-				if events[i].Flags&unix.EV_EOF != 0 {
-					log.Println("Client socket closed")
-					unix.Close(eventFD)
-					conClients -= 1
-					continue
-				}
+				// TODO: implement graceful shutdown as this method hinders pipelined commands from running
+				//if events[i].Flags&unix.EV_EOF != 0 {
+				//	log.Println("Client socket closed")
+				//	unix.Close(eventFD)
+				//	conClients -= 1
+				//	continue
+				//}
 
 				comm := core.FDComm{Fd: eventFD}
-				cmd, err := readCommand(comm)
+				cmds, err := readCommands(comm)
 				if err != nil {
 					unix.Close(eventFD)
 					conClients -= 1
 					continue
 				}
-				respond(cmd, comm)
+				respond(cmds, comm)
 
 			}
 		}
