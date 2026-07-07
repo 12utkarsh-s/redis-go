@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"io"
-	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -143,6 +142,11 @@ func evalEXPIRE(args []string) []byte {
 	return RespOne
 }
 
+func evalBGREWRITEAOF(args []string) []byte {
+	DumpAllAOF()
+	return RespOk
+}
+
 func EvalAndRespond(cmds []*RedisCmd, c io.ReadWriter) {
 
 	var response []byte
@@ -163,11 +167,12 @@ func EvalAndRespond(cmds []*RedisCmd, c io.ReadWriter) {
 			buf.Write(evalDEL(cmd.Args))
 		case "EXPIRE":
 			buf.Write(evalEXPIRE(cmd.Args))
+		case "BGREWRITEAOF":
+			buf.Write(evalBGREWRITEAOF(cmd.Args))
 		default:
 			buf.Write(evalPING(cmd.Args))
 		}
 	}
 
-	log.Println("here")
 	c.Write(buf.Bytes())
 }
