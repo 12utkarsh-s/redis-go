@@ -40,6 +40,7 @@ func evalSET(args []string) []byte {
 	var durationInMs int64 = -1
 
 	key, value = args[0], args[1]
+	oType, oEnc := deduceTypeAndEncoding(value)
 
 	for i := 2; i < len(args); i++ {
 		switch args[i] {
@@ -60,7 +61,7 @@ func evalSET(args []string) []byte {
 
 	}
 
-	Put(key, NewObject(value, durationInMs))
+	Put(key, NewObject(value, durationInMs, oType, oEnc))
 	return RespOk
 }
 
@@ -142,6 +143,33 @@ func evalEXPIRE(args []string) []byte {
 	return RespOne
 }
 
+func evalINCR(args []string) []byte {
+	if len(args) != 1 {
+		return Encode(errors.New("ERR wrong number of arguments for 'incr' command"), false)
+	}
+
+	var key = args[0]
+	obj := Get(key)
+	if obj == nil {
+		obj = NewObject("0", -1, OBJ_TYPE_STRING, OBJ_ENCODING_INT)
+		Put(key, obj)
+	}
+
+	if err := assertType(obj.TypeEncoding, OBJ_TYPE_STRING); err != nil {
+		return Encode(err, false)
+	}
+
+	if err := assertEncoding(obj.TypeEncoding, OBJ_ENCODING_INT); err != nil {
+		return Encode(err, false)
+	}
+
+	val, _ := strconv.ParseInt(obj.Value.(string), 10, 64)
+	val++
+	obj.Value = strconv.FormatInt(val, 10)
+
+	return Encode(val, false)
+}
+
 func evalBGREWRITEAOF(args []string) []byte {
 	DumpAllAOF()
 	return RespOk
@@ -167,6 +195,8 @@ func EvalAndRespond(cmds []*RedisCmd, c io.ReadWriter) {
 			buf.Write(evalDEL(cmd.Args))
 		case "EXPIRE":
 			buf.Write(evalEXPIRE(cmd.Args))
+		case "INCR":
+			buf.Write(evalINCR(cmd.Args))
 		case "BGREWRITEAOF":
 			buf.Write(evalBGREWRITEAOF(cmd.Args))
 		default:

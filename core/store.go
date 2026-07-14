@@ -6,8 +6,9 @@ import (
 )
 
 type Object struct {
-	ExpiresAt int64
-	Value     interface{}
+	Value        interface{}
+	TypeEncoding uint8
+	ExpiresAt    int64
 }
 
 var store map[string]*Object
@@ -16,15 +17,16 @@ func init() {
 	store = make(map[string]*Object)
 }
 
-func NewObject(value interface{}, duration int64) *Object {
+func NewObject(value interface{}, duration int64, oType uint8, oEnc uint8) *Object {
 	var expiresAt int64 = -1
 	if duration > 0 {
 		expiresAt = time.Now().UnixMilli() + duration
 	}
 
 	return &Object{
-		ExpiresAt: expiresAt,
-		Value:     value,
+		Value:        value,
+		TypeEncoding: oType | oEnc,
+		ExpiresAt:    expiresAt,
 	}
 }
 
