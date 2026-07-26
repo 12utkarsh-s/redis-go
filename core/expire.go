@@ -7,12 +7,12 @@ import (
 func expireSample() float32 {
 	var limit, expiredCount = 20, 0
 
-	for keys, obj := range store {
+	for key, obj := range store {
 		if obj.ExpiresAt != -1 {
 			limit--
 
 			if obj.ExpiresAt <= time.Now().UnixMilli() {
-				delete(store, keys)
+				Delete(key)
 				expiredCount++
 			}
 		}

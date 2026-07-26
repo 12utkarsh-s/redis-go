@@ -34,6 +34,10 @@ func Put(key string, obj *Object) {
 	if len(store) >= config.KeysLimit {
 		Evict()
 	}
+	if KeySpaceStats[0] == nil {
+		KeySpaceStats[0] = make(map[string]int)
+	}
+	KeySpaceStats[0]["keys"]++
 	store[key] = obj
 }
 
@@ -50,6 +54,7 @@ func Get(key string) *Object {
 func Delete(key string) bool {
 	if _, ok := store[key]; ok {
 		delete(store, key)
+		KeySpaceStats[0]["keys"]--
 		return true
 	}
 	return false

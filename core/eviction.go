@@ -22,7 +22,6 @@ func evictAllkeysRandom() {
 }
 
 func Evict() {
-
 	switch config.EvictionStrategy {
 	case "simple-first":
 		evictFirst()
