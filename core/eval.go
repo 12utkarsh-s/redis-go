@@ -79,10 +79,6 @@ func evalGET(args []string) []byte {
 		return RespNil
 	}
 
-	if obj.ExpiresAt != -1 && obj.ExpiresAt <= time.Now().UnixMilli() {
-		return RespNil
-	}
-
 	return Encode(obj.Value, false)
 }
 
@@ -111,6 +107,10 @@ func evalTTL(args []string) []byte {
 }
 
 func evalDEL(args []string) []byte {
+	if len(args) == 0 {
+		return Encode(errors.New("ERR wrong number of arguments for 'del' command"), false)
+	}
+
 	var countDeleted = 0
 
 	for _, key := range args {

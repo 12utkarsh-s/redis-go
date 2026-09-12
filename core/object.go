@@ -1,6 +1,6 @@
 package core
 
-type Obj struct {
+type Object struct {
 	TypeEncoding uint8
 	Value        interface{}
 	ExpiresAt    int64

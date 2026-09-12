@@ -5,12 +5,6 @@ import (
 	"time"
 )
 
-type Object struct {
-	Value        interface{}
-	TypeEncoding uint8
-	ExpiresAt    int64
-}
-
 var store map[string]*Object
 
 func init() {
@@ -44,7 +38,7 @@ func Put(key string, obj *Object) {
 func Get(key string) *Object {
 	obj, _ := store[key]
 	if obj != nil && obj.ExpiresAt != -1 && obj.ExpiresAt <= time.Now().UnixMilli() {
-		delete(store, key)
+		Delete(key)
 		return nil
 	}
 
