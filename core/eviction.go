@@ -77,10 +77,15 @@ func evictAllkeysLRU() {
 	for evicted := int64(0); evicted < evictCount && len(store) > 0; {
 		populateEvictionPool()
 
-		// A pooled item is only a snapshot taken when the key was sampled, so it
-		// is re-validated against the store before we act on it. Rejected items
-		// are not counted towards evictCount - they freed nothing.
-		for evicted < evictCount {
+		// Evict only the single best candidate before sampling again. Draining
+		// the pool here would evict everything sampled regardless of rank,
+		// which is just random eviction - the pool has to outlive a round so
+		// that the stalest keys accumulate in it.
+		//
+		// A pooled item is only a snapshot taken when the key was sampled, so
+		// it is re-validated against the store before we act on it. Rejected
+		// items are not counted towards evictCount - they freed nothing.
+		for {
 			item := ePool.Pop()
 			if item == nil {
 				break
@@ -99,6 +104,7 @@ func evictAllkeysLRU() {
 
 			Delete(item.key)
 			evicted++
+			break
 		}
 	}
 }
