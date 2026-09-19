@@ -9,6 +9,6 @@ var ExpiryCronFrequency = 1 * time.Second
 
 var KeysLimit = 100
 var EvictionRatio = 0.40
-var EvictionStrategy = "allkeys-random"
+var EvictionStrategy = "allkeys-lru"
 
 var AOFFile = "./redis-go.aof"

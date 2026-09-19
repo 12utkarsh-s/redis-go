@@ -42,7 +42,6 @@ func stormSet(wg *sync.WaitGroup) {
 			panic(err)
 		}
 	}
-	conn.Close()
 }
 
 func main() {

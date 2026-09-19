@@ -94,14 +94,16 @@ func evalTTL(args []string) []byte {
 		return RespMinus2
 	}
 
-	if obj.ExpiresAt == -1 {
+	exp, isExpirySet := expires[obj]
+	if !isExpirySet {
 		return RespMinus1
 	}
 
-	durationLeft := obj.ExpiresAt - time.Now().UnixMilli()
-	if durationLeft < 0 {
+	if hasExpired(obj) {
 		return RespMinus2
 	}
+
+	durationLeft := exp - uint64(time.Now().UnixMilli())
 
 	return Encode(durationLeft/1000, false)
 }
@@ -139,7 +141,7 @@ func evalEXPIRE(args []string) []byte {
 		return RespZero
 	}
 
-	obj.ExpiresAt = time.Now().UnixMilli() + (exDurationSex * 1000)
+	setExpiry(obj, exDurationSex*1000)
 
 	return RespOne
 }
@@ -195,6 +197,11 @@ func evalBGREWRITEAOF(args []string) []byte {
 	return RespOk
 }
 
+func evalLRU(args []string) []byte {
+	evictAllkeysLRU()
+	return RespOk
+}
+
 func EvalAndRespond(cmds []*RedisCmd, c io.ReadWriter) {
 
 	var response []byte
@@ -225,6 +232,8 @@ func EvalAndRespond(cmds []*RedisCmd, c io.ReadWriter) {
 			buf.Write(evalLATENCY(cmd.Args))
 		case "BGREWRITEAOF":
 			buf.Write(evalBGREWRITEAOF(cmd.Args))
+		case "LRU":
+			buf.Write(evalLRU(cmd.Args))
 		default:
 			buf.Write(evalPING(cmd.Args))
 		}

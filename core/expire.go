@@ -4,19 +4,30 @@ import (
 	"time"
 )
 
+func hasExpired(obj *Object) bool {
+	exp, isExpirySet := getExpiry(obj)
+	if !isExpirySet {
+		return false
+	}
+	return exp <= uint64(time.Now().UnixMilli())
+}
+
+func getExpiry(obj *Object) (uint64, bool) {
+	exp, isExpirySet := expires[obj]
+	return exp, isExpirySet
+}
+
 func expireSample() float32 {
 	var limit, expiredCount = 20, 0
 
 	for key, obj := range store {
-		if obj.ExpiresAt != -1 {
+		if _, isExpirySet := getExpiry(obj); isExpirySet {
 			limit--
-
-			if obj.ExpiresAt <= time.Now().UnixMilli() {
+			if hasExpired(obj) {
 				Delete(key)
 				expiredCount++
 			}
 		}
-
 		if limit == 0 {
 			break
 		}
