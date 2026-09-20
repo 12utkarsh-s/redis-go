@@ -202,6 +202,19 @@ func evalLRU(args []string) []byte {
 	return RespOk
 }
 
+func evalSLEEP(args []string) []byte {
+	if len(args) != 1 {
+		return Encode(errors.New("ERR wrong number of arguments for 'SLEEP' command"), false)
+	}
+
+	durationSec, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return Encode(errors.New("ERR value is not an integer or out of range"), false)
+	}
+	time.Sleep(time.Duration(durationSec) * time.Second)
+	return RespOk
+}
+
 func EvalAndRespond(cmds []*RedisCmd, c io.ReadWriter) {
 
 	var response []byte
@@ -234,6 +247,8 @@ func EvalAndRespond(cmds []*RedisCmd, c io.ReadWriter) {
 			buf.Write(evalBGREWRITEAOF(cmd.Args))
 		case "LRU":
 			buf.Write(evalLRU(cmd.Args))
+		case "SLEEP":
+			buf.Write(evalSLEEP(cmd.Args))
 		default:
 			buf.Write(evalPING(cmd.Args))
 		}
