@@ -58,12 +58,26 @@ func RunAsyncTCPServer(wg *sync.WaitGroup) error {
 
 	log.Println("Starting async tcp server on ", config.Host, config.Port)
 
+	// maxClients does double duty: the listen backlog (how many completed
+	// connections the kernel will hold for us before refusing new ones) and the
+	// size of the buffer kqueue writes ready events into. Both are ceilings on
+	// how much work can pile up between two iterations of the event loop.
 	maxClients := 20000
 
-	// Create KQUEUE Event Objects to hold events
+	// Scratch space kqueue fills in on each wakeup. Allocated once and reused
+	// for every iteration so the hot loop does not allocate.
 	events := make([]unix.Kevent_t, maxClients)
 
-	// Create a Socket
+	//
+	// This is the LISTENING socket, and it is the only one created by hand.
+	//   AF_INET     - IPv4 addressing (an AF_INET6 socket would speak IPv6)
+	//   SOCK_STREAM - a reliable, ordered byte stream, i.e. TCP semantics
+	//   0           - let the kernel pick the default protocol for that pair,
+	//                 which is TCP
+	//
+	// Right now it is an anonymous endpoint: it has a type but no address, and
+	// it cannot receive anything. Bind and Listen below are what turn it into a
+	// server.
 	serverFD, err := unix.Socket(unix.AF_INET, unix.SOCK_STREAM, 0)
 	if err != nil {
 		log.Fatal("Error while creating Socket ", err)
@@ -76,11 +90,21 @@ func RunAsyncTCPServer(wg *sync.WaitGroup) error {
 		}
 	}(serverFD)
 
+	// Non-blocking means Accept returns EAGAIN instead of parking the goroutine
+	// when no connection is pending. The whole design depends on this: one
+	// thread drives every client, so a single blocking call would stall all of
+	// them. We only ever call Accept after kqueue has told us it will succeed,
+	// but this guarantees a spurious wakeup cannot freeze the loop.
 	if err = unix.SetNonblock(serverFD, true); err != nil {
 		return err
 	}
 
-	// Bind the IP and the port
+	// Bind attaches a local address to the socket: "this IP, this port is
+	// mine". The kernel now routes inbound TCP packets for that address here.
+	// Without it the socket has no address for clients to reach.
+	//
+	// This is also where "address already in use" comes from: the kernel
+	// refuses a second binding of the same host:port.
 	ip4 := net.ParseIP(config.Host).To4()
 	if err := unix.Bind(serverFD, &unix.SockaddrInet4{
 		Port: config.Port,
@@ -90,7 +114,13 @@ func RunAsyncTCPServer(wg *sync.WaitGroup) error {
 		return err
 	}
 
-	// Start listening
+	// Listen flips the socket from active to passive. An active socket is one
+	// you'd Connect out on; a passive one only accepts inbound connections and
+	// never carries application data itself.
+	//
+	// The kernel now completes TCP handshakes on our behalf and parks each
+	// finished connection in an accept queue, up to maxClients deep. Accept
+	// below pulls from that queue.
 	if err = unix.Listen(serverFD, maxClients); err != nil {
 		log.Fatal("Error while trying to listen to server ", err)
 		return err
@@ -98,7 +128,13 @@ func RunAsyncTCPServer(wg *sync.WaitGroup) error {
 
 	//------------------------------Async IO-----------------------------------
 
-	// Creating Kqueue instance (macOS equivalent of epoll_create1)
+	// A kqueue (macOS equivalent of epoll) is a kernel-side readiness queue.
+	// We hand it a set of descriptors to watch, and it blocks until at least one
+	// is ready, then hands back only those. That is what lets one thread serve
+	// thousands of connections: we never poll idle sockets, and we never park
+	// on a client that has nothing to say.
+	//
+	// Note it is itself a file descriptor, from the same table as the sockets.
 	kqueueFD, err := unix.Kqueue()
 	if err != nil {
 		log.Fatal(err)
@@ -110,6 +146,14 @@ func RunAsyncTCPServer(wg *sync.WaitGroup) error {
 		}
 	}(kqueueFD)
 
+	// Watch the listening socket for readability. On a passive socket
+	// "readable" does not mean bytes are waiting, it means the accept queue is
+	// non-empty: at least one client has completed its handshake and Accept
+	// will return immediately.
+	//
+	//   Ident  - which descriptor to watch
+	//   Filter - what kind of readiness (EVFILT_READ: readable)
+	//   Flags  - EV_ADD registers it, EV_ENABLE arms it for delivery
 	socketServerEvent := unix.Kevent_t{
 		Ident:  uint64(serverFD),
 		Filter: unix.EVFILT_READ,
@@ -128,6 +172,9 @@ func RunAsyncTCPServer(wg *sync.WaitGroup) error {
 			expiryCronLastExecution = time.Now()
 		}
 
+		// Block until something is ready, then fill events[] with only the
+		// descriptors that are. nevents is how many of them are valid; the rest
+		// of the buffer is stale from previous iterations and must be ignored.
 		nevents, err := unix.Kevent(kqueueFD, nil, events[:], nil)
 		if err != nil {
 			continue
@@ -141,22 +188,50 @@ func RunAsyncTCPServer(wg *sync.WaitGroup) error {
 			return nil
 		}
 
+		// Every ready descriptor is either the listening socket (a new client is
+		// knocking) or one of the per-connection sockets (an existing client
+		// sent us a command). Comparing against serverFD is what tells them
+		// apart, and it is the only distinction the loop needs.
 		for i := 0; i < nevents; i++ {
 			eventFD := int(events[i].Ident)
 
 			if eventFD == serverFD {
+				// Accept pulls one completed connection off the queue and
+				// returns a BRAND-NEW descriptor for it. This is the key idea:
+				//
+				//   serverFD - one per process, bound to host:port, carries no
+				//              application data, lives for the whole run, and
+				//              exists only to manufacture client sockets
+				//   clientFD - one per connected client, identified by the full
+				//              (src IP, src port, dst IP, dst port) tuple, and
+				//              the thing we actually read commands from and
+				//              write replies to
+				//
+				// serverFD is untouched by this and stays listening, which is
+				// how the next client can arrive while this one is being
+				// served. Two clients from the same host get different
+				// clientFDs because their source ports differ.
 				clientFD, _, err := unix.Accept(serverFD)
 				if err != nil {
 					log.Println("err", err)
 					continue
 				}
 
+				// Per-connection state (notably the MULTI queue) keyed by the
+				// descriptor, so a later event on this clientFD can find the
+				// same Client back.
 				connectedClients[clientFD] = core.NewClient(clientFD)
+
+				// Same reasoning as serverFD: a client that opens a connection
+				// and then sends a partial command must not be able to block
+				// the reads of every other client.
 				if err = unix.SetNonblock(clientFD, true); err != nil {
 					return err
 				}
 
-				// Add this new TCP connection to be monitored
+				// Hand the new connection to kqueue as well. From here on we
+				// hear about this client only through the event loop, and here
+				// "readable" has its ordinary meaning: bytes are waiting.
 				socketClientEvent := unix.Kevent_t{
 					Ident:  uint64(clientFD),
 					Filter: unix.EVFILT_READ,
@@ -166,21 +241,19 @@ func RunAsyncTCPServer(wg *sync.WaitGroup) error {
 					log.Fatal("Error while registering client socket ", err)
 				}
 			} else {
-				// Kqueue gives us a handy EOF flag we can check right away for disconnects
-				// TODO: implement graceful shutdown as this method hinders pipelined commands from running
-				//if events[i].Flags&unix.EV_EOF != 0 {
-				//	log.Println("Client socket closed")
-				//	unix.Close(eventFD)
-				//	conClients -= 1
-				//	continue
-				//}
-
+				// An existing connection has data. Recover the Client we
+				// stored at accept time so any in-progress transaction on it
+				// is still there.
 				comm := connectedClients[eventFD]
 				if comm == nil {
 					continue
 				}
 				cmds, err := readCommands(comm)
 				if err != nil {
+					// Read failure here is overwhelmingly EOF: the client hung
+					// up. Close the descriptor (which also drops it from
+					// kqueue) and discard its state. Closing is what lets the
+					// kernel reuse this integer for a future clientFD.
 					unix.Close(eventFD)
 					delete(connectedClients, eventFD)
 					continue
