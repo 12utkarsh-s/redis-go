@@ -3,11 +3,7 @@ package server
 import (
 	"fmt"
 	"io"
-	"log"
-	"net"
-	"redis-go/config"
 	"redis-go/core"
-	"strconv"
 )
 
 func toArrayString(values []interface{}) ([]string, error) {
@@ -53,45 +49,6 @@ func respondError(err error, c io.ReadWriter) {
 	c.Write([]byte(fmt.Sprintf("-%s\r\n", err)))
 }
 
-func respond(cmds []*core.RedisCmd, c io.ReadWriter) {
+func respond(cmds []*core.RedisCmd, c *core.Client) {
 	core.EvalAndRespond(cmds, c)
-}
-
-func RunSyncTCPServer() {
-	log.Println("starting a synchronous TCP server on", config.Host, config.Port)
-
-	var conClients = 0
-
-	// listening to the configured host:port
-	lsnr, err := net.Listen("tcp", config.Host+":"+strconv.Itoa(config.Port))
-	if err != nil {
-		panic(err)
-	}
-
-	for {
-		// blocking call: waiting for the new client to connect
-		c, err := lsnr.Accept()
-		if err != nil {
-			panic(err)
-		}
-
-		// increment the number of concurrent clients
-		conClients += 1
-		log.Println("client connected with address:", c.RemoteAddr(), ", concurrent clients", conClients)
-
-		for {
-			// over the socket, continuously read the command and print it out
-			cmd, err := readCommands(c)
-			if err != nil {
-				c.Close()
-				conClients -= 1
-				log.Println("client disconnected", c.RemoteAddr(), "concurrent clients", conClients)
-				if err == io.EOF {
-					break
-				}
-				log.Println("err", err)
-			}
-			respond(cmd, c)
-		}
-	}
 }

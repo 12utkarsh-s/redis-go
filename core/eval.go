@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +15,13 @@ var RespZero = []byte(":0\r\n")
 var RespOne = []byte(":1\r\n")
 var RespMinus1 = []byte(":-1\r\n")
 var RespMinus2 = []byte(":-2\r\n")
+var RespQueued = []byte("+QUEUED\r\n")
+
+var txnCommands map[string]bool
+
+func init() {
+	txnCommands = map[string]bool{"MULTI": true, "EXEC": true, "DISCARD": true}
+}
 
 func evalPING(args []string) []byte {
 	if len(args) >= 2 {
@@ -215,42 +221,77 @@ func evalSLEEP(args []string) []byte {
 	return RespOk
 }
 
-func EvalAndRespond(cmds []*RedisCmd, c io.ReadWriter) {
+func evalMULTI(args []string) []byte {
+	return RespOk
+}
+
+func executeCommand(cmd *RedisCmd, c *Client) []byte {
+	command := strings.ToUpper(cmd.Cmd)
+	switch command {
+	case "PING":
+		return evalPING(cmd.Args)
+	case "SET":
+		return evalSET(cmd.Args)
+	case "GET":
+		return evalGET(cmd.Args)
+	case "TTL":
+		return evalTTL(cmd.Args)
+	case "DEL":
+		return evalDEL(cmd.Args)
+	case "EXPIRE":
+		return evalEXPIRE(cmd.Args)
+	case "INCR":
+		return evalINCR(cmd.Args)
+	case "INFO":
+		return evalINFO(cmd.Args)
+	case "CLIENT":
+		return evalCLIENT(cmd.Args)
+	case "LATENCY":
+		return evalLATENCY(cmd.Args)
+	case "BGREWRITEAOF":
+		return evalBGREWRITEAOF(cmd.Args)
+	case "LRU":
+		return evalLRU(cmd.Args)
+	case "SLEEP":
+		return evalSLEEP(cmd.Args)
+	case "MULTI":
+		if c.isTxn {
+			return Encode(errors.New("ERR MULTI calls can not be nested"), false)
+		}
+		c.TxnBegin()
+		return evalMULTI(cmd.Args)
+	case "EXEC":
+		if !c.isTxn {
+			return Encode(errors.New("ERR EXEC without MULTI"), false)
+		}
+		return c.TxnExec()
+	case "DISCARD":
+		if !c.isTxn {
+			return Encode(errors.New("ERR DISCARD without MULTI"), false)
+		}
+		c.TxnDiscard()
+		return RespOk
+	default:
+		return evalPING(cmd.Args)
+	}
+}
+
+func EvalAndRespond(cmds []*RedisCmd, c *Client) {
 
 	var response []byte
 	buf := bytes.NewBuffer(response)
 
 	for _, cmd := range cmds {
-		command := strings.ToUpper(cmd.Cmd)
-		switch command {
-		case "PING":
-			buf.Write(evalPING(cmd.Args))
-		case "SET":
-			buf.Write(evalSET(cmd.Args))
-		case "GET":
-			buf.Write(evalGET(cmd.Args))
-		case "TTL":
-			buf.Write(evalTTL(cmd.Args))
-		case "DEL":
-			buf.Write(evalDEL(cmd.Args))
-		case "EXPIRE":
-			buf.Write(evalEXPIRE(cmd.Args))
-		case "INCR":
-			buf.Write(evalINCR(cmd.Args))
-		case "INFO":
-			buf.Write(evalINFO(cmd.Args))
-		case "CLIENT":
-			buf.Write(evalCLIENT(cmd.Args))
-		case "LATENCY":
-			buf.Write(evalLATENCY(cmd.Args))
-		case "BGREWRITEAOF":
-			buf.Write(evalBGREWRITEAOF(cmd.Args))
-		case "LRU":
-			buf.Write(evalLRU(cmd.Args))
-		case "SLEEP":
-			buf.Write(evalSLEEP(cmd.Args))
-		default:
-			buf.Write(evalPING(cmd.Args))
+		if !c.isTxn {
+			buf.Write(executeCommand(cmd, c))
+			continue
+		} else {
+			if !txnCommands[strings.ToUpper(cmd.Cmd)] {
+				c.TxnQueue(cmd)
+				buf.Write(RespQueued)
+			} else {
+				buf.Write(executeCommand(cmd, c))
+			}
 		}
 	}
 

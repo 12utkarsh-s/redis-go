@@ -13,7 +13,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-var conClients = 0
 var expiryCronLastExecution = time.Now()
 
 // Engine states are bit flags rather than an enum, because the engine can be
@@ -44,9 +43,11 @@ const EngineStatus__BUSY int32 = 1 << 2
 const EngineStatus__SHUTTING_DOWN int32 = 1 << 3
 
 var eStatus atomic.Int32
+var connectedClients map[int]*core.Client
 
 func init() {
 	eStatus.Store(EngineStatus__WAITING)
+	connectedClients = make(map[int]*core.Client)
 }
 
 func RunAsyncTCPServer(wg *sync.WaitGroup) error {
@@ -68,7 +69,12 @@ func RunAsyncTCPServer(wg *sync.WaitGroup) error {
 		log.Fatal("Error while creating Socket ", err)
 		return err
 	}
-	defer unix.Close(serverFD)
+	defer func(fd int) {
+		err := unix.Close(fd)
+		if err != nil {
+			log.Println("Error while closing Socket ", err)
+		}
+	}(serverFD)
 
 	if err = unix.SetNonblock(serverFD, true); err != nil {
 		return err
@@ -92,7 +98,7 @@ func RunAsyncTCPServer(wg *sync.WaitGroup) error {
 
 	//------------------------------Async IO-----------------------------------
 
-	// Creating Kqueue instance (macOS equivalent of epoll_create1) [cite: 10, 11]
+	// Creating Kqueue instance (macOS equivalent of epoll_create1)
 	kqueueFD, err := unix.Kqueue()
 	if err != nil {
 		log.Fatal(err)
@@ -100,7 +106,7 @@ func RunAsyncTCPServer(wg *sync.WaitGroup) error {
 	defer func(fd int) {
 		err := unix.Close(fd)
 		if err != nil {
-			log.Fatal("Error while closing kqueue ", err)
+			log.Println("Error while closing kqueue ", err)
 		}
 	}(kqueueFD)
 
@@ -145,7 +151,7 @@ func RunAsyncTCPServer(wg *sync.WaitGroup) error {
 					continue
 				}
 
-				conClients += 1
+				connectedClients[clientFD] = core.NewClient(clientFD)
 				if err = unix.SetNonblock(clientFD, true); err != nil {
 					return err
 				}
@@ -169,11 +175,14 @@ func RunAsyncTCPServer(wg *sync.WaitGroup) error {
 				//	continue
 				//}
 
-				comm := core.FDComm{Fd: eventFD}
+				comm := connectedClients[eventFD]
+				if comm == nil {
+					continue
+				}
 				cmds, err := readCommands(comm)
 				if err != nil {
 					unix.Close(eventFD)
-					conClients -= 1
+					delete(connectedClients, eventFD)
 					continue
 				}
 				respond(cmds, comm)
