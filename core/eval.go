@@ -208,6 +208,11 @@ func evalLRU(args []string) []byte {
 	return RespOk
 }
 
+func evalLFU(args []string) []byte {
+	evictAllkeysLFU()
+	return RespOk
+}
+
 func evalSLEEP(args []string) []byte {
 	if len(args) != 1 {
 		return Encode(errors.New("ERR wrong number of arguments for 'SLEEP' command"), false)
@@ -252,6 +257,8 @@ func executeCommand(cmd *RedisCmd, c *Client) []byte {
 		return evalBGREWRITEAOF(cmd.Args)
 	case "LRU":
 		return evalLRU(cmd.Args)
+	case "LFU":
+		return evalLFU(cmd.Args)
 	case "SLEEP":
 		return evalSLEEP(cmd.Args)
 	case "MULTI":

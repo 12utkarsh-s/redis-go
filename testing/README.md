@@ -1,10 +1,12 @@
 # Manual eviction tests
 
-Two stdlib-only Python scripts for exercising the eviction strategies against a
-running server. Neither is a unit test - start the server first:
+Stdlib-only Python scripts for exercising the eviction strategies against a
+running server. None of them is a unit test - start the server first, picking
+the strategy under test:
 
 ```sh
-go run .
+go run .                                  # allkeys-lru, the default
+go run . -eviction-strategy allkeys-lfu
 ```
 
 ## lru_semantics.py
@@ -27,6 +29,29 @@ a bypassed eviction pool looks like.
 
 Assumes the defaults in `config`: `KeysLimit = 100` and `EvictionRatio = 0.40`,
 giving an evictCount of 40. Adjust `HOT`/`COLD` if you change those.
+
+## lfu_semantics.py
+
+Checks that `allkeys-lfu` evicts the *least frequently used* keys rather than
+the least recently used ones.
+
+```sh
+python3 testing/lfu_semantics.py
+```
+
+Seeds 60 keys, hits the first 20 sixty times each so their counters climb, then
+forces one eviction cycle via the `LFU` command. There is deliberately no sleep:
+the cold keys stay the most recently written, so ranking by the clock would keep
+the wrong half.
+
+Expect **18-20/20 hot surviving** and **0-2/40 cold surviving**. The counter
+climbs logarithmically - roughly 10 more hits per step above the initial value -
+so fewer hits than `HITS = 60` narrows the gap between hot and cold and pushes
+the result towards random.
+
+Same config assumptions as `lru_semantics.py`. Note that `LfuDecayTime = 1`
+means counters lose a point per idle minute, so a run paused midway will read
+colder than it looks.
 
 ## monitor.py
 
