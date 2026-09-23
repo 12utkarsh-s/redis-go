@@ -3,8 +3,11 @@ package core
 import "sort"
 
 type PoolItem struct {
-	key            string
-	lastAccessedAt uint32
+	key string
+	// lruBits is the object's LRUBits as it stood when the key was sampled -
+	// an idle-time clock under LRU, a decay stamp plus access counter under
+	// LFU. evictionScore is what reads it either way.
+	lruBits uint32
 }
 
 type EvictionPool struct {
@@ -12,51 +15,52 @@ type EvictionPool struct {
 	keyset map[string]*PoolItem
 }
 
-// ByIdleTime orders items most-idle first. The clock is captured once and held
-// for the whole sort, so the ordering stays a valid total order even if the
-// clock ticks while sort.Sort is running.
-type ByIdleTime struct {
+// ByEvictionScore orders items best-candidate first, by whichever score the
+// configured strategy ranks on. The clock is captured once and held for the
+// whole sort, so the ordering stays a valid total order even if the clock
+// ticks while sort.Sort is running.
+type ByEvictionScore struct {
 	items []*PoolItem
-	now   uint32
+	clock evictionClock
 }
 
-func byIdleTime(items []*PoolItem) ByIdleTime {
-	return ByIdleTime{items: items, now: getCurrentClock()}
+func byEvictionScore(items []*PoolItem) ByEvictionScore {
+	return ByEvictionScore{items: items, clock: newEvictionClock()}
 }
 
-func (a ByIdleTime) Len() int {
+func (a ByEvictionScore) Len() int {
 	return len(a.items)
 }
 
-func (a ByIdleTime) Swap(i, j int) {
+func (a ByEvictionScore) Swap(i, j int) {
 	a.items[i], a.items[j] = a.items[j], a.items[i]
 }
 
-func (a ByIdleTime) Less(i, j int) bool {
-	return getIdleTimeAt(a.now, a.items[i].lastAccessedAt) >
-		getIdleTimeAt(a.now, a.items[j].lastAccessedAt)
+func (a ByEvictionScore) Less(i, j int) bool {
+	return evictionScore(a.clock, a.items[i].lruBits) >
+		evictionScore(a.clock, a.items[j].lruBits)
 }
 
-func (pq *EvictionPool) Push(key string, lastAccessedAt uint32) {
+func (pq *EvictionPool) Push(key string, lruBits uint32) {
 	_, ok := pq.keyset[key]
 	if ok {
 		return
 	}
 
 	if len(pq.pool) < ePoolSizeMax {
-		item := &PoolItem{key: key, lastAccessedAt: lastAccessedAt}
+		item := &PoolItem{key: key, lruBits: lruBits}
 		pq.keyset[key] = item
 		pq.pool = append(pq.pool, item)
-		sort.Sort(byIdleTime(pq.pool))
-	} else if now := getCurrentClock(); getIdleTimeAt(now, lastAccessedAt) > getIdleTimeAt(now, pq.pool[len(pq.pool)-1].lastAccessedAt) {
-		item := &PoolItem{key: key, lastAccessedAt: lastAccessedAt}
+		sort.Sort(byEvictionScore(pq.pool))
+	} else if clock := newEvictionClock(); evictionScore(clock, lruBits) > evictionScore(clock, pq.pool[len(pq.pool)-1].lruBits) {
+		item := &PoolItem{key: key, lruBits: lruBits}
 		toRemove := pq.pool[len(pq.pool)-1]
 		pq.pool = pq.pool[:len(pq.pool)-1]
 		delete(pq.keyset, toRemove.key)
 
 		pq.keyset[key] = item
 		pq.pool = append(pq.pool, item)
-		sort.Sort(byIdleTime(pq.pool))
+		sort.Sort(byEvictionScore(pq.pool))
 	}
 }
 

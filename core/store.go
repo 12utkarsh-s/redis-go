@@ -19,9 +19,16 @@ func setExpiry(object *Object, expDurationMs int64) {
 
 func NewObject(value interface{}, duration int64, oType uint8, oEnc uint8) *Object {
 	obj := &Object{
-		Value:          value,
-		TypeEncoding:   oType | oEnc,
-		LastAccessedAt: getCurrentClock(),
+		Value:        value,
+		TypeEncoding: oType | oEnc,
+	}
+	if config.EvictionStrategy == "allkeys-lfu" {
+		// Start above zero so a key created just before an eviction round is
+		// not the first thing evicted, and below the point where the
+		// logarithmic increment slows down, so it can still climb.
+		obj.LRUBits = (getCurrentClockInMinutes() << 8) | config.LfuInitVal
+	} else {
+		obj.LRUBits = getCurrentClock()
 	}
 	if duration > 0 {
 		setExpiry(obj, duration)
@@ -29,11 +36,21 @@ func NewObject(value interface{}, duration int64, oType uint8, oEnc uint8) *Obje
 	return obj
 }
 
+// touch records an access against whichever eviction strategy is configured:
+// the last-access clock for LRU, the decayed access counter for LFU.
+func touch(obj *Object) {
+	if config.EvictionStrategy == "allkeys-lfu" {
+		updateLFU(obj)
+		return
+	}
+	obj.LRUBits = getCurrentClock()
+}
+
 func Put(key string, obj *Object) {
 	if len(store) >= config.KeysLimit {
 		Evict()
 	}
-	obj.LastAccessedAt = getCurrentClock()
+	touch(obj)
 	if KeySpaceStats[0] == nil {
 		KeySpaceStats[0] = make(map[string]int)
 	}
@@ -50,7 +67,7 @@ func Get(key string) *Object {
 		Delete(key)
 		return nil
 	}
-	obj.LastAccessedAt = getCurrentClock()
+	touch(obj)
 	return obj
 }
 
